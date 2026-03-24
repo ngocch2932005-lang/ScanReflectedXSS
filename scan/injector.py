@@ -195,7 +195,7 @@ def _build_key_query(params: list[Param], active: Param, marker: str) -> str:
         if p.name == active.name:
             parts.append(marker)          # key-only: no '='
         elif p.has_value:
-            parts.append(f"{p.name}={DUMMY_VALUE}")
+            parts.append(f" {p.name}={DUMMY_VALUE}")
         else:
             parts.append(p.name)
     return "&".join(parts)
