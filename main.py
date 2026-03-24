@@ -85,17 +85,18 @@ _CTX_MAP = {
 
 def _url_to_endpoint(raw_url: str) -> dict:
     parsed = urlparse(raw_url)
-    param_names = []
+    params = []
     for part in parsed.query.split("&"):
         if part:
+            has_value = "=" in part
             name = part.split("=")[0]
             if name:
-                param_names.append(name)
+                params.append({"name": name, "has_value": has_value})
     clean = parsed._replace(query="", fragment="").geturl()
     return {
         "url":     clean,
         "method":  "GET",
-        "params":  param_names,
+        "params":  params,
         "raw_url": raw_url,
         "type":    "link",
     }

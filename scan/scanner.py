@@ -113,15 +113,25 @@ def probe_endpoint(endpoint: dict) -> list[dict]:
     if method != "GET":
         return []
 
-    param_names: list[str] = endpoint.get("params", [])
+    raw_params = endpoint.get("params", [])
     raw_url: str = endpoint.get("raw_url", "") or endpoint.get("url", "")
 
+    # endpoint["params"] may be list[dict] (from crawler) or list[str] (from _url_to_endpoint)
+    # Normalise to list[Param]
+    crawler_params: list[Param] = []
+    for p in raw_params:
+        if isinstance(p, dict):
+            crawler_params.append(Param(name=p["name"], has_value=p.get("has_value", True)))
+        elif isinstance(p, str):
+            crawler_params.append(Param(name=p, has_value=True))
+
     detected = {p.name: p for p in parse_params(raw_url)}
-    known    = set(param_names)
+    known    = {p.name for p in crawler_params}
 
     all_params: list[Param] = []
-    for name in param_names:
-        all_params.append(detected.get(name, Param(name=name, has_value=True)))
+    for cp in crawler_params:
+        # prefer has_value info from raw_url parse if available, else trust crawler
+        all_params.append(detected.get(cp.name, cp))
     for p in detected.values():
         if p.name not in known:
             all_params.append(p)
