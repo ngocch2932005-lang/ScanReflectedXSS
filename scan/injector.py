@@ -63,7 +63,6 @@ class ProbeTarget:
     probe_kind:   str  # 'value' | 'key' | 'bare'
 
 
-
 def build_probe_urls(endpoint: dict, markers: dict[str, str]) -> list[ProbeTarget]:
     """
     For every parameter in *endpoint*, build probe URL(s) with the marker injected.

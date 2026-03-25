@@ -139,3 +139,4 @@ def detect_per_position(html: str, marker: str) -> list[ReflectionPoint]:
         ))
 
     return points
+
