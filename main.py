@@ -63,18 +63,14 @@ def _setup_logging(verbose: bool) -> None:
     logging.getLogger("requests").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
-# Context mapping — giữ nguyên
-# detector labels: "html" | "attribute" | "url" | "script" | "style" | "comment"
+# Context mapping
+# detector labels: "html" | "attribute" | "script"
 # ---------------------------------------------------------------------------
 
 _CTX_MAP = {
     "html":      "html",
     "attribute": "attribute",
-    "url":       "attribute",
-    "script":    "js",
-    "tag_name":  "attribute",
-    "style":     None,    # skip
-    "comment":   None,    # skip
+    "script":    "script",
 }
 
 
@@ -154,9 +150,6 @@ def run_scan(
                       raw_ctx, url, param)
             continue
 
-        if raw_ctx == "url" and not attr_name:
-            attr_name = "href"
-
         dedup_key = (url, param, context, attr_name)
         if dedup_key in seen:
             continue
@@ -171,7 +164,7 @@ def run_scan(
 
         # ── 2a: Probe filters ────────────────────────────────────────────
         marker = generate_marker()
-        js_qc  = quote_char if context == "js" else ""
+        js_qc  = quote_char if context == "script" else ""
 
         fm = probe_filters(
             base_url      = url,
@@ -181,7 +174,7 @@ def run_scan(
             js_quote_char = js_qc,
         )
 
-        if context == "js":
+        if context == "script":
             desc = "raw JS" if not js_qc else f"inside {js_qc!r}-quoted string"
             print(f"  │  js position: {desc}")
 
@@ -266,6 +259,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Giây chờ giữa verify requests (default: 0)")
     p.add_argument("--report-dir",  default="reports",
                    help="Thư mục xuất báo cáo (default: reports)")
+    p.add_argument("--verbose", "-v", action="store_true",
+                   help="Verbose logging")
 
     return p
 
