@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>XSS Scan Report</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+     background:#f4f6f8;color:#1a1a2e;font-size:14px;line-height:1.6}
+header{background:#1a1a2e;color:#fff;padding:24px 40px}
+header h1{font-size:22px;font-weight:600}
+header p{font-size:13px;color:#a0aec0;margin-top:4px}
+.summary{display:flex;gap:16px;padding:24px 40px;flex-wrap:wrap}
+.stat{background:#fff;border-radius:8px;padding:16px 24px;
+      min-width:130px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.stat .n{font-size:28px;font-weight:700}
+.stat .l{font-size:12px;color:#718096;margin-top:2px}
+.findings{padding:0 40px 40px;display:flex;flex-direction:column;gap:16px}
+.card{background:#fff;border-radius:8px;overflow:hidden;
+      box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.card-head{display:flex;align-items:center;gap:10px;padding:12px 20px;
+           border-bottom:1px solid #edf2f7}
+.badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:4px;
+       color:#fff;text-transform:uppercase}
+.ctx{font-size:11px;background:#edf2f7;color:#4a5568;
+     padding:3px 9px;border-radius:4px}
+.card-head .u{font-weight:600;font-size:13px;word-break:break-all}
+.card-body{padding:16px 20px;display:grid;
+           grid-template-columns:130px 1fr;row-gap:10px}
+.lb{font-size:12px;color:#718096;padding-top:2px}
+.vl{font-size:13px;word-break:break-all}
+.mono{font-family:'SFMono-Regular',Consolas,monospace;font-size:12px;
+      background:#f7fafc;border:1px solid #e2e8f0;
+      padding:8px 12px;border-radius:4px;white-space:pre-wrap;word-break:break-all}
+.note{font-size:12px;color:#718096;font-style:italic;margin-top:4px}
+.empty{padding:60px 40px;text-align:center;color:#718096;font-size:15px}
+</style>
+</head>
+<body>
+<header>
+  <h1>XSS Scan Report</h1>
+  <p>Target: https://0ab600e103fee45c806e491800300026.web-security-academy.net/</p>
+  <p>Generated 2026-03-24 14:52 UTC</p>
+</header>
+<div class="summary">
+  <div class="stat"><div class="n">1</div><div class="l">Total</div></div>
+  <div class="stat"><div class="n" style="color:#c0392b">0</div><div class="l">High</div></div>
+  <div class="stat"><div class="n" style="color:#e67e22">1</div><div class="l">Medium</div></div>
+  <div class="stat"><div class="n" style="color:#27ae60">0</div><div class="l">Low</div></div>
+</div>
+<div class="findings">
+<div class="card">
+  <div class="card-head">
+    <span class="badge" style="background:#e67e22">medium</span>
+    <span class="ctx">html</span>
+    <span class="u">#1 &nbsp;https://0ab600e103fee45c806e491800300026.web-security-academy.net/</span>
+  </div>
+  <div class="card-body">
+    <div class="lb">Parameter</div>
+    <div class="vl"><code>search</code></div>
+    
+    <div class="lb">Strategy</div>
+    <div class="vl">body_onresize</div>
+    <div class="lb">Payload</div>
+    <div class="vl">
+      <div class="mono">&lt;body onresize=alert(1)&gt;</div>
+      <div class="note">auto-triggers</div>
+    </div>
+    <div class="lb">Evidence</div>
+    <div class="vl">Playwright: alert dialog fired — msg: 1 | strategy=body_onresize</div>
+    <div class="lb">Probe URL</div>
+    <div class="vl">
+      <a href="https://0ab600e103fee45c806e491800300026.web-security-academy.net/?search=%3Cbody+onresize%3Dalert%281%29%3E" target="_blank"
+         style="color:#3182ce;word-break:break-all">https://0ab600e103fee45c806e491800300026.web-security-academy.net/?search=%3Cbody+onresize%3Dalert%281%29%3E</a>
+    </div>
+  </div>
+</div></div>
+</body>
+</html>

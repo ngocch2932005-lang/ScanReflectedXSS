@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://0ab600e103fee45c806e491800300026.web-security-academy.net/",
+    "method": "GET",
+    "params": [],
+    "raw_url": "https://0ab600e103fee45c806e491800300026.web-security-academy.net/",
+    "type": "link"
+  },
+  {
+    "url": "https://0ab600e103fee45c806e491800300026.web-security-academy.net/",
+    "method": "GET",
+    "params": [
+      {
+        "name": "search",
+        "has_value": true
+      }
+    ],
+    "raw_url": "https://0ab600e103fee45c806e491800300026.web-security-academy.net/",
+    "type": "form"
+  },
+  {
+    "url": "https://0ab600e103fee45c806e491800300026.web-security-academy.net/post",
+    "method": "GET",
+    "params": [
+      {
+        "name": "postId",
+        "has_value": true
+      }
+    ],
+    "raw_url": "https://0ab600e103fee45c806e491800300026.web-security-academy.net/post?postId=5",
+    "type": "link"
+  },
+  {
+    "url": "https://0ab600e103fee45c806e491800300026.web-security-academy.net/post/comment",
+    "method": "POST",
+    "params": [
+      {
+        "name": "comment",
+        "has_value": true
+      },
+      {
+        "name": "csrf",
+        "has_value": true
+      },
+      {
+        "name": "email",
+        "has_value": true
+      },
+      {
+        "name": "name",
+        "has_value": true
+      },
+      {
+        "name": "postId",
+        "has_value": true
+      },
+      {
+        "name": "website",
+        "has_value": true
+      }
+    ],
+    "raw_url": "https://0ab600e103fee45c806e491800300026.web-security-academy.net/post/comment",
+    "type": "form"
+  }
+]

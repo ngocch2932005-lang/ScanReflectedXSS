@@ -3,21 +3,23 @@ detector.py — Reflection detection and HTML-context classification.
 
 Public API
 ----------
-find_reflections(html, marker) -> list[int]
-detect_contexts(html, marker)  -> list[str]
-detect_per_position(html, marker) -> list[ReflectionPoint]
-extract_snippet(html, pos, marker) -> str
+find_reflections(html, marker)        -> list[int]
+detect_per_position(html, marker)     -> list[ReflectionPoint]
+extract_snippet(html, pos, marker)    -> str
 
-JS sub-context detection
-------------------------
-Khi marker nằm trong <script>...</script>, cần phân biệt:
-  - Trong string literal đơn:  var x = 'MARKER'   → quote_char = "'"
-  - Trong string literal kép:  var x = "MARKER"   → quote_char = '"'
-  - Trong template literal:    var x = `MARKER`   → quote_char = "`"
-  - Raw JS (không trong string): var x = MARKER;  → quote_char = ""
+Supported contexts
+------------------
+  html       — marker nằm trong text node hoặc ngoài tag
+  attribute  — marker nằm trong giá trị thuộc tính HTML
+               quote_char: '"' | "'" | "" (unquoted)
+               attr_name:  tên thuộc tính
+  script     — marker nằm trong <script>...</script>
+               quote_char: "'" | '"' | "`" | "" (raw JS)
 
-quote_char này truyền thẳng vào filter_prober và payload_generator
-để chọn đúng strategy breakout.
+Các context style, comment, url, tag_name bị loại bỏ:
+  - style / comment: không xử lý, bỏ qua hoàn toàn (skip reflection).
+  - url: gộp vào attribute — attr_name đủ để phân biệt nếu cần.
+  - tag_name: gộp vào html.
 """
 
 import re
@@ -31,15 +33,6 @@ from dataclasses import dataclass
 _SCRIPT_PAT  = re.compile(r"<script(?:\s[^>]*)?>.*?</script>", re.DOTALL | re.IGNORECASE)
 _STYLE_PAT   = re.compile(r"<style(?:\s[^>]*)?>.*?</style>",   re.DOTALL | re.IGNORECASE)
 _COMMENT_PAT = re.compile(r"<!--.*?-->",                         re.DOTALL)
-
-_URL_ATTR_GENERAL  = re.compile(
-    r"(?:href|src|action|data|formaction)\s*=\s*",
-    re.IGNORECASE,
-)
-_URL_ATTR_UNQUOTED = re.compile(
-    r"(?:href|src|action|data|formaction)\s*=\s*$",
-    re.IGNORECASE,
-)
 
 _ATTR_NAME_RE = re.compile(r'([\w:_-]+)\s*=\s*$', re.IGNORECASE)
 
@@ -58,9 +51,8 @@ class ReflectionPoint:
     Fields
     ------
     position  : character offset in HTML
-    context   : "html" | "attribute" | "url" | "script" | "style"
-                | "comment" | "tag_name"
-    attr_name : attribute name if context is "attribute"/"url", else ""
+    context   : "html" | "attribute" | "script"
+    attr_name : attribute name if context is "attribute", else ""
     quote_char: for attribute: the quote char ('"' | "'" | "")
                 for script:    the JS string delimiter ('"' | "'" | "`" | "")
                                "" means raw JS (not inside a string literal)
@@ -126,15 +118,9 @@ def _js_quote_char(script_content: str, marker_offset: int) -> str:
 
     Returns the opening quote character: "'" | '"' | '`' | ""
     "" means the marker is in raw JS (not inside any string).
-
-    Algorithm: simple state machine — tracks open string delimiters.
-    Handles backslash escaping and template literal nesting.
-    Does NOT handle multi-line regex or comments fully, but covers
-    the common PortSwigger / real-world patterns correctly.
     """
-    i        = 0
-    in_str   = ""    # current string delimiter, "" = not in string
-    in_tmpl  = 0     # template literal nesting depth
+    i      = 0
+    in_str = ""  # current string delimiter, "" = not in string
 
     while i < marker_offset:
         c = script_content[i]
@@ -153,7 +139,7 @@ def _js_quote_char(script_content: str, marker_offset: int) -> str:
 
         i += 1
 
-    return in_str   # "" = raw JS, "'" / '"' / "`" = inside that string
+    return in_str  # "" = raw JS, "'" / '"' / "`" = inside that string
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +148,11 @@ def _js_quote_char(script_content: str, marker_offset: int) -> str:
 
 def _classify_position(html: str, pos: int) -> tuple[str, str, str]:
     """
-    Backwards-walk from pos to classify HTML attribute context.
+    Backwards-walk from pos to classify context.
     Returns (context, attr_name, quote_char).
+
+    context is one of: "html" | "attribute"
+    tag_name positions are folded into "html".
     """
     j = pos - 1
     while j >= 0:
@@ -177,34 +166,29 @@ def _classify_position(html: str, pos: int) -> tuple[str, str, str]:
 
             in_dq = False
             in_sq = False
-            i = 0
-            while i < len(tag_content):
-                c = tag_content[i]
+            for c in tag_content:
                 if c == '"' and not in_sq:
                     in_dq = not in_dq
                 elif c == "'" and not in_dq:
                     in_sq = not in_sq
-                i += 1
 
-            stripped   = tag_content.rstrip()
-            am         = _ATTR_NAME_RE.search(stripped)
-            attr_name  = am.group(1).lower() if am else ""
+            stripped  = tag_content.rstrip()
+            am        = _ATTR_NAME_RE.search(stripped)
+            attr_name = am.group(1).lower() if am else ""
 
             if in_dq:
-                is_url = bool(_URL_ATTR_GENERAL.search(tag_content))
-                return ("url" if is_url else "attribute"), attr_name, '"'
+                return "attribute", attr_name, '"'
 
             if in_sq:
-                is_url = bool(_URL_ATTR_GENERAL.search(tag_content))
-                return ("url" if is_url else "attribute"), attr_name, "'"
+                return "attribute", attr_name, "'"
 
             if stripped.endswith("="):
-                is_url = bool(_URL_ATTR_UNQUOTED.search(stripped))
-                am2    = re.search(r'([\w:_-]+)\s*=\s*$', stripped, re.IGNORECASE)
-                aname  = am2.group(1).lower() if am2 else ""
-                return ("url" if is_url else "attribute"), aname, ""
+                am2   = re.search(r'([\w:_-]+)\s*=\s*$', stripped, re.IGNORECASE)
+                aname = am2.group(1).lower() if am2 else ""
+                return "attribute", aname, ""
 
-            return "tag_name", "", ""
+            # tag_name or bare inside tag → treat as html
+            return "html", "", ""
 
         j -= 1
 
@@ -219,45 +203,43 @@ def detect_per_position(html: str, marker: str) -> list[ReflectionPoint]:
     """
     Return one ReflectionPoint per occurrence of marker in html.
 
+    Positions inside <style> or HTML comments are silently skipped —
+    payloads cannot execute in those contexts.
+
     For script context, quote_char tells the JS string delimiter:
-      "'"  → marker is inside single-quoted string  → need ' breakout
-      '"'  → marker is inside double-quoted string  → need " breakout
-      '`'  → marker is inside template literal      → need ` breakout
-      ""   → marker is raw JS                       → direct execution
+      "'"  → inside single-quoted string  → need ' breakout
+      '"'  → inside double-quoted string  → need " breakout
+      '`'  → inside template literal      → need ` breakout
+      ""   → raw JS                       → direct execution
     """
     if not html or marker not in html:
         return []
 
-    script_spans  = _build_spans(html, _SCRIPT_PAT)
-    style_spans   = _build_spans(html, _STYLE_PAT)
-    comment_spans = _build_spans(html, _COMMENT_PAT)
+    script_spans = _build_spans(html, _SCRIPT_PAT)
+    ignore_spans = (
+        _build_spans(html, _STYLE_PAT) +
+        _build_spans(html, _COMMENT_PAT)
+    )
 
     # Pre-extract script block contents and their start offsets
     script_blocks: list[tuple[int, str]] = []
     for m in _SCRIPT_PAT.finditer(html):
-        # Find where the actual JS content starts (after the opening >)
         tag_end = html.index(">", m.start()) + 1
         script_blocks.append((tag_end, html[tag_end: m.end()]))
 
     points: list[ReflectionPoint] = []
     for pos in find_reflections(html, marker):
 
-        if _in_spans(pos, comment_spans):
-            ctx, aname, qchar = "comment", "", ""
+        # Skip style blocks and HTML comments entirely
+        if _in_spans(pos, ignore_spans):
+            continue
 
-        elif _in_spans(pos, script_spans):
-            # Determine JS sub-context: which string literal (if any)?
-            ctx   = "script"
-            aname = ""
-            qchar = ""
+        if _in_spans(pos, script_spans):
+            ctx, aname, qchar = "script", "", ""
             for (js_start, js_content) in script_blocks:
                 if js_start <= pos < js_start + len(js_content):
-                    offset = pos - js_start
-                    qchar  = _js_quote_char(js_content, offset)
+                    qchar = _js_quote_char(js_content, pos - js_start)
                     break
-
-        elif _in_spans(pos, style_spans):
-            ctx, aname, qchar = "style", "", ""
 
         else:
             ctx, aname, qchar = _classify_position(html, pos)
@@ -271,12 +253,3 @@ def detect_per_position(html: str, marker: str) -> list[ReflectionPoint]:
         ))
 
     return points
-
-
-# ---------------------------------------------------------------------------
-# Public: legacy API
-# ---------------------------------------------------------------------------
-
-def detect_contexts(html: str, marker: str) -> list[str]:
-    """Deduplicated, sorted list of context labels across all positions."""
-    return sorted({p.context for p in detect_per_position(html, marker)})

@@ -41,7 +41,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from scan.marker         import generate_marker
-from scan.scanner        import run_marker_scan, enable_debug
+from scan.scanner        import run_marker_scan
 from filter_prober.filter_prober  import probe_filters
 from verify.payload_generator import generate_payloads, AttributeMeta
 from verify.verifier       import verify_finding, close_browser, Finding
@@ -56,12 +56,11 @@ log = logging.getLogger("xss_scanner.main")
 # ---------------------------------------------------------------------------
 
 def _setup_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
+    level = logging.INFO
     fmt   = "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s"
     logging.basicConfig(level=level, format=fmt, datefmt="%H:%M:%S")
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
-
 
 # ---------------------------------------------------------------------------
 # Context mapping — giữ nguyên
@@ -267,10 +266,7 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Giây chờ giữa verify requests (default: 0)")
     p.add_argument("--report-dir",  default="reports",
                    help="Thư mục xuất báo cáo (default: reports)")
-    p.add_argument("--debug",       action="store_true",
-                   help="Dump probe HTML responses vào debug_responses/")
-    p.add_argument("--verbose",     action="store_true",
-                   help="Bật DEBUG logging")
+
     return p
 
 
@@ -279,8 +275,6 @@ def main() -> None:
     args   = parser.parse_args()
     _setup_logging(args.verbose)
 
-    if args.debug:
-        enable_debug()
 
     target_url = args.seed_url or args.url or ""
 

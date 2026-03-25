@@ -64,33 +64,6 @@ class ProbeTarget:
 
 
 
-def parse_params(url: str) -> list[Param]:
-    """
-    Parse query string of *url* into Param objects.
-
-    Preserves all param types:
-      - key-only  (?heh)  -> Param(name='heh', has_value=False)
-      - empty val (?q=)   -> Param(name='q',   has_value=True)
-      - normal    (?q=1)  -> Param(name='q',   has_value=True)
-
-    Duplicate names are dropped (first occurrence wins).
-    """
-    query = urlparse(url).query
-    if not query:
-        return []
-    seen: set[str] = set()
-    params: list[Param] = []
-    for part in query.split("&"):
-        if not part:
-            continue
-        has_value = "=" in part
-        name = part.split("=", 1)[0]
-        if name and name not in seen:
-            seen.add(name)
-            params.append(Param(name=name, has_value=has_value))
-    return params
-
-
 def build_probe_urls(endpoint: dict, markers: dict[str, str]) -> list[ProbeTarget]:
     """
     For every parameter in *endpoint*, build probe URL(s) with the marker injected.
@@ -195,7 +168,7 @@ def _build_key_query(params: list[Param], active: Param, marker: str) -> str:
         if p.name == active.name:
             parts.append(marker)          # key-only: no '='
         elif p.has_value:
-            parts.append(f" {p.name}={DUMMY_VALUE}")
+            parts.append(f"{p.name}={DUMMY_VALUE}")
         else:
             parts.append(p.name)
     return "&".join(parts)

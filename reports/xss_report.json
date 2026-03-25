@@ -1,0 +1,20 @@
+{
+  "generated": "2026-03-24T14:52:19.110889+00:00",
+  "total": 1,
+  "findings": [
+    {
+      "url": "https://0ab600e103fee45c806e491800300026.web-security-academy.net/",
+      "param": "search",
+      "context": "html",
+      "attr_name": "",
+      "severity": "medium",
+      "payload": {
+        "value": "<body onresize=alert(1)>",
+        "strategy": "body_onresize",
+        "note": "auto-triggers"
+      },
+      "probe_url": "https://0ab600e103fee45c806e491800300026.web-security-academy.net/?search=%3Cbody+onresize%3Dalert%281%29%3E",
+      "evidence": "Playwright: alert dialog fired — msg: 1 | strategy=body_onresize"
+    }
+  ]
+}

@@ -20,12 +20,12 @@ from requests import Response
 
 from scan.marker import generate_marker
 from scan.injector import (
-    build_probe_urls, parse_params,
+    build_probe_urls,
     ProbeTarget, Param, BARE_PARAM_NAME,
 )
 from scan.detector import (
-    find_reflections, detect_per_position,
-    extract_snippet, ReflectionPoint,
+    detect_per_position,
+    ReflectionPoint,
 )
 
 log = logging.getLogger("xss_scanner.scanner")
@@ -42,35 +42,6 @@ SESSION.headers.update({
     "Accept":          "text/html,application/xhtml+xml,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
 })
-
-_DEBUG_MODE = False
-_DEBUG_DIR  = "debug_responses"
-
-
-def enable_debug(output_dir: str = "debug_responses") -> None:
-    global _DEBUG_MODE, _DEBUG_DIR
-    _DEBUG_MODE = True
-    _DEBUG_DIR  = output_dir
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-    log.info("Debug mode ON → ./%s/", output_dir)
-
-
-def _debug_save(param: str, url: str, html: str, marker: str) -> None:
-    if not _DEBUG_MODE:
-        return
-    slug = hashlib.md5(url.encode()).hexdigest()[:8]
-    path = Path(_DEBUG_DIR) / f"{param}_{slug}.html"
-    count = html.count(marker)
-    header = (
-        f"<!-- DEBUG\n"
-        f"     URL   : {url}\n"
-        f"     Param : {param}\n"
-        f"     Marker: {marker}\n"
-        f"     Count : {count}x\n"
-        f"     Len   : {len(html)}\n"
-        f"-->\n"
-    )
-    path.write_text(header + html, encoding="utf-8", errors="replace")
 
 
 def _fetch(url: str) -> Optional[Response]:
@@ -114,30 +85,21 @@ def probe_endpoint(endpoint: dict) -> list[dict]:
         return []
 
     raw_params = endpoint.get("params", [])
-    raw_url: str = endpoint.get("raw_url", "") or endpoint.get("url", "")
 
-    # endpoint["params"] may be list[dict] (from crawler) or list[str] (from _url_to_endpoint)
-    # Normalise to list[Param]
-    crawler_params: list[Param] = []
+    # Normalise to list[Param] — params may be list[dict] (crawler/JSON)
+    # or list[str] (legacy format). Crawler is the single source of truth;
+    # no re-parsing of raw_url needed.
+    all_params: list[Param] = []
     for p in raw_params:
         if isinstance(p, dict):
-            crawler_params.append(Param(name=p["name"], has_value=p.get("has_value", True)))
+            all_params.append(Param(name=p["name"], has_value=p.get("has_value", True)))
         elif isinstance(p, str):
-            crawler_params.append(Param(name=p, has_value=True))
-
-    detected = {p.name: p for p in parse_params(raw_url)}
-    known    = {p.name for p in crawler_params}
-
-    all_params: list[Param] = []
-    for cp in crawler_params:
-        # prefer has_value info from raw_url parse if available, else trust crawler
-        all_params.append(detected.get(cp.name, cp))
-    for p in detected.values():
-        if p.name not in known:
-            all_params.append(p)
+            all_params.append(Param(name=p, has_value=True))
 
     markers: dict[str, str] = {p.name: generate_marker() for p in all_params}
-    markers[BARE_PARAM_NAME] = generate_marker()
+    # Bare probe only makes sense when there are no known params.
+    if not all_params:
+        markers[BARE_PARAM_NAME] = generate_marker()
 
     probe_targets: list[ProbeTarget] = build_probe_urls(endpoint, markers)
     results: list[dict] = []
@@ -151,14 +113,9 @@ def probe_endpoint(endpoint: dict) -> list[dict]:
 
         html = resp.text
         raw_count = html.count(target.marker)
-        log.debug("  marker appears %dx  len=%d", raw_count, len(html))
 
         if raw_count == 0:
-            log.debug("  No reflection for param '%s'", target.param.name)
-            _debug_save(target.param.name, target.injected_url, html, target.marker)
             continue
-
-        _debug_save(target.param.name, target.injected_url, html, target.marker)
 
         # Get per-position detail — one ReflectionPoint per occurrence
         points: list[ReflectionPoint] = detect_per_position(html, target.marker)
