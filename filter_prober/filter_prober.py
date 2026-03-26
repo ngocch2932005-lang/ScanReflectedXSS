@@ -1,21 +1,17 @@
 """
 filter_prober.py — Atomic filter detection for XSS context.
 
-Logic giữ nguyên hoàn toàn so với bản gốc (2-phase brute-force):
+2-phase brute-force:
   Phase 1: Probe các tags → tìm tag nào không bị block
   Phase 2: Probe events trên từng allowed tag → tìm combo (tag, event) hoạt động
   Result:  FilterMap.allowed_combos = [(tag, event), ...]
 
-Thay đổi duy nhất so với bản gốc:
-  - ALL_TAGS  : trim xuống còn tags cần thiết để bypass 5 lab PortSwigger
-  - ALL_EVENTS: trim xuống còn events cần thiết để bypass 5 lab PortSwigger
-
-Mapping 5 test case → tags/events cần thiết:
-  Test 1 (html, body+onresize)     → tags: body | events: onresize, onpageshow
-  Test 2 (html, custom xss+onfocus)→ tags: xss, x, custom | events: onfocus, onmouseover
-  Test 3 (attribute, onmouseover)  → probe events trên img (attr context logic)
-  Test 4 (script, tag breakout)    → probe script tag + angles
-  Test 5 (script, backslash)       → probe backslash + quote chars
+Mapping 5 lab PortSwigger → tags/events cần thiết:
+  Lab 1 (html, body+onresize)      → tags: body | events: onresize, onpageshow
+  Lab 2 (html, custom xss+onfocus) → tags: xss  | events: onfocus, onmouseover
+  Lab 3 (attribute, onmouseover)   → probe events trên img (attr context)
+  Lab 4 (js, angle brackets)       → probe script tag + angles
+  Lab 5 (js, single quote escaped) → probe backslash + quote chars
 """
 
 from __future__ import annotations
@@ -43,7 +39,7 @@ _SESSION.headers.update({
 
 
 # ---------------------------------------------------------------------------
-# Behavior enum — giữ nguyên
+# Behavior enum
 # ---------------------------------------------------------------------------
 
 class Behavior(str, Enum):
@@ -52,60 +48,35 @@ class Behavior(str, Enum):
     ESCAPED  = "escaped"
     DOUBLED  = "doubled"
     STRIPPED = "stripped"
-    PARTIAL  = "partial"
     UNKNOWN  = "unknown"
 
 
 # ---------------------------------------------------------------------------
-# Tags & Events — TRIMMED cho 5 lab PortSwigger
+# Tags & Events
 # ---------------------------------------------------------------------------
 
-# Giải thích lựa chọn:
-#   body    → Test 1: body onresize / onpageshow
-#   xss, x  → Test 2: custom tag + onfocus (WAF thường quên block custom tags)
-#   img     → Test 3 (attribute context) + general fallback
-#   svg     → general fallback HTML context
-#   input   → fallback với onfocus/autofocus
-#   details → ontoggle fallback
 ALL_TAGS: list[str] = [
-    "body",     # Test 1: body onresize / onpageshow
-    "xss",      # Test 2: custom tag (WAF thường không block custom tag)
-    "img",      # fallback: img onerror
-    "svg",      # fallback: svg onload
-    "input",    # fallback: input onfocus autofocus
+    "body",
+    "xss",
+    "img",
+    "svg",
+    "input",
 ]
 
-# Giải thích lựa chọn:
-#   onresize    → Test 1: body onresize (trigger bằng iframe resize)
-#   onpageshow  → Test 1 variant: fires on page load
-#   onfocus     → Test 2: xss tag + tabindex + fragment #x
-#   onmouseover → Test 3: attribute context breakout; cũng dùng ở HTML
-#   onerror     → img onerror — classic fallback
-#   onload      → svg/body onload
-#   ontoggle    → details open ontoggle
-#   onclick     → interaction-required fallback
 ALL_EVENTS: list[str] = [
-    # Auto-trigger (không cần user interaction) — ưu tiên cao
-    "onresize",     # Test 1
-    "onpageshow",   # Test 1 variant
-    "onfocus",      # Test 2
-    "onerror",      # img fallback
-    "onload",       # svg/body
-    "ontoggle",     # details
-    # Require interaction
-    "onmouseover",  # Test 3 + HTML fallback
-    "onclick",      # interaction fallback
+    "onresize",
+    "onpageshow",
+    "onfocus",
+    "onerror",
+    "onload",
+    "ontoggle",
+    "onmouseover",
+    "onclick",
 ]
-
-# Events auto-trigger (không cần user click/hover)
-AUTO_TRIGGER_EVENTS: set[str] = {
-    "onresize", "onpageshow", "onfocus", "onerror",
-    "onload", "ontoggle",
-}
 
 
 # ---------------------------------------------------------------------------
-# FilterMap — giữ nguyên hoàn toàn
+# FilterMap
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -126,16 +97,7 @@ class FilterMap:
     allowed_combos: list[tuple[str, str]] = field(default_factory=list)
     allowed_tags:   list[str]             = field(default_factory=list)
 
-    # Per-tag-category shortcuts (derived)
-    custom_tag_events: Behavior = Behavior.UNKNOWN
-    body_events:       Behavior = Behavior.UNKNOWN
-    input_events:      Behavior = Behavior.UNKNOWN
-
     raw: dict = field(default_factory=dict)
-
-    # ------------------------------------------------------------------
-    # Derived properties — giữ nguyên
-    # ------------------------------------------------------------------
 
     @property
     def tags_usable(self) -> bool:
@@ -147,44 +109,12 @@ class FilterMap:
         return self.tags_usable and self.script_tag == Behavior.ALLOWED
 
     @property
-    def events_usable(self) -> bool:
-        return self.tags_usable and self.event_handlers == Behavior.ALLOWED
-
-    @property
-    def custom_tag_ok(self) -> bool:
-        return self.custom_tag_events == Behavior.ALLOWED
-
-    @property
-    def body_events_ok(self) -> bool:
-        return self.body_events == Behavior.ALLOWED
-
-    @property
-    def input_events_ok(self) -> bool:
-        return self.input_events == Behavior.ALLOWED
-
-    @property
-    def has_any_combo(self) -> bool:
-        return len(self.allowed_combos) > 0
-
-    @property
-    def double_quote_free(self) -> bool:
-        return self.double_quote == Behavior.ALLOWED
-
-    @property
-    def single_quote_free(self) -> bool:
-        return self.single_quote == Behavior.ALLOWED
-
-    @property
-    def backtick_free(self) -> bool:
-        return self.backtick == Behavior.ALLOWED
-
-    @property
     def backslash_doubles(self) -> bool:
         return self.backslash == Behavior.DOUBLED
 
 
 # ---------------------------------------------------------------------------
-# Known encoding forms — giữ nguyên
+# Known encoding forms
 # ---------------------------------------------------------------------------
 
 _ENTITY_FORMS: dict[str, list[str]] = {
@@ -199,7 +129,7 @@ _BACKSLASH_ESCAPE = {"'": ["\\'"], '"': ['\\"']}
 
 
 # ---------------------------------------------------------------------------
-# HTTP helpers — giữ nguyên
+# HTTP helpers
 # ---------------------------------------------------------------------------
 
 def _build_url(base_url: str, param: str, value: str) -> str:
@@ -209,54 +139,47 @@ def _build_url(base_url: str, param: str, value: str) -> str:
     return urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
 
 
-def _fetch(base_url: str, param: str, value: str) -> tuple[str | None, int]:
+def _fetch_text(base_url: str, param: str, value: str) -> str | None:
     url = _build_url(base_url, param, value)
     try:
         r = _SESSION.get(url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-        ct = r.headers.get("Content-Type", "")
-        if "html" not in ct:
-            return None, r.status_code
-        return r.text, r.status_code
+        if "html" not in r.headers.get("Content-Type", ""):
+            return None
+        return r.text
     except requests.RequestException:
-        return None, 0
-
-
-def _fetch_text(base_url: str, param: str, value: str) -> str | None:
-    html, _ = _fetch(base_url, param, value)
-    return html
+        return None
 
 
 # ---------------------------------------------------------------------------
-# Character analyser — giữ nguyên
+# Character analyser
 # ---------------------------------------------------------------------------
 
 def _analyse_char(html: str, sentinel: str, char: str) -> Behavior:
     if html is None:
         return Behavior.UNKNOWN
+
     if f"{sentinel}{char}{sentinel}" in html:
         return Behavior.ALLOWED
+
     m = re.search(re.escape(sentinel) + r"(.*?)" + re.escape(sentinel),
                   html, re.DOTALL)
-    if m:
-        between = m.group(1)
-        if not between:
-            return Behavior.STRIPPED
-        # ESCAPED phải check TRƯỚC ENCODED:
-        # Trong HTML, &#39; là entity cho ' — nhưng \' là JS escape.
-        # Nếu check ENCODED trước, &#39; sẽ match trước \' → false ENCODED.
-        # Thứ tự đúng: ESCAPED → ENCODED → PARTIAL/ALLOWED
-        for form in _BACKSLASH_ESCAPE.get(char, []):
-            if form in between:
-                return Behavior.ESCAPED
-        for form in _ENTITY_FORMS.get(char, []):
-            if form.lower() in between.lower():
-                return Behavior.ENCODED
-        if char not in between:
-            return Behavior.PARTIAL
-        return Behavior.ALLOWED
-    if sentinel[:4] in html:
-        return Behavior.PARTIAL
-    return Behavior.STRIPPED
+    if not m:
+        return Behavior.STRIPPED
+
+    between = m.group(1)
+
+    if not between:
+        return Behavior.STRIPPED
+
+    for form in _BACKSLASH_ESCAPE.get(char, []):
+        if form in between:
+            return Behavior.ESCAPED
+
+    for form in _ENTITY_FORMS.get(char, []):
+        if form.lower() in between.lower():
+            return Behavior.ENCODED
+
+    return Behavior.UNKNOWN
 
 
 def _probe_char(base_url: str, param: str, marker: str, char: str) -> Behavior:
@@ -272,59 +195,16 @@ def _probe_char_in_js_string(
     char:       str,
     quote_char: str,
 ) -> Behavior:
-    """
-    Probe behavior của một char khi nằm TRONG JS string literal.
-
-    Tại sao _probe_char thông thường không đủ:
-    ============================================
-    Server PortSwigger lab này có 2 lớp xử lý ĐỘCLẬP:
-
-      Layer 1 — HTML context encode (áp dụng cho toàn bộ output HTML):
-        '  → &#39;    (HTML entity)
-        <  → &lt;
-        "  → &quot;
-
-      Layer 2 — JS string escape (chỉ áp dụng bên trong JS string literal):
-        '  → \'       (backslash-escape)
-
-    _probe_char gửi  SENTINELF'SENTINELF  dưới dạng raw param.
-    Server thấy reflection nằm trong HTML body (text node / attribute),
-    không phải JS string → chỉ áp dụng Layer 1 → trả về &#39; → ENCODED.
-
-    _analyse_char check ENCODED trước ESCAPED → luôn trả về ENCODED,
-    không bao giờ tới ESCAPED → sq_escaped = False → bs_pay không sinh.
-
-    Approach đúng — đọc raw JS source:
-    =====================================
-    Gửi probe bình thường (sentinel + char + sentinel).
-    Nhưng thay vì dùng _analyse_char trên toàn HTML, ta:
-      1. Extract <script>...</script> block từ HTML response.
-      2. Tìm sentinel pair TRONG JS source (không qua HTML parser).
-      3. Đọc trực tiếp chars giữa 2 sentinel trong raw JS source.
-         Trong JS source, server KHÔNG HTML-encode nữa (đã ở trong <script>),
-         nhưng CÓ JS-escape → \\' xuất hiện thay vì &#39;.
-      4. Phân tích riêng: nếu thấy \\' → ESCAPED; nếu thấy raw ' → ALLOWED.
-
-    Ví dụ với lab này (quote_char = "'"):
-      Probe value:  MARKERJS'MARKERJS
-      HTML response chứa:  var searchTerms = 'MARKERJS\\'MARKERJS';
-      → Trong <script> block ta thấy:  MARKERJS\\'MARKERJS
-      → giữa 2 sentinel là: \\'
-      → đó là backslash + quote → ESCAPED  ✓
-    """
     sentinel = f"{marker}JS"
-    probe    = f"{sentinel}{char}{sentinel}"
-    html     = _fetch_text(base_url, param, probe)
+    html     = _fetch_text(base_url, param, f"{sentinel}{char}{sentinel}")
     if html is None:
         return Behavior.UNKNOWN
 
-    # Extract tất cả <script> blocks
     for m in re.finditer(r"<script[^>]*>(.*?)</script>", html, re.DOTALL | re.IGNORECASE):
         js_src = m.group(1)
         if sentinel not in js_src:
             continue
 
-        # Tìm vị trí của 2 sentinel trong raw JS source
         idx1 = js_src.find(sentinel)
         idx2 = js_src.find(sentinel, idx1 + len(sentinel))
         if idx1 == -1 or idx2 == -1:
@@ -335,30 +215,15 @@ def _probe_char_in_js_string(
 
         if not between:
             return Behavior.STRIPPED
-
-        # Trong raw JS source (không qua HTML decode):
-        #   ESCAPED:  server thêm backslash trước char  →  \' hoặc \"
-        #   DOUBLED:  server double backslash            →  \\
-        #   ALLOWED:  char xuất hiện nguyên vẹn
-        #   STRIPPED: char biến mất hoàn toàn
-
-        escaped_form = f"\\{char}"   # 2 chars: backslash + char
-        if escaped_form in between and char in between:
-            # \' present → ESCAPED (backslash là escape prefix, không phải literal)
+        if f"\\{char}" in between:
             return Behavior.ESCAPED
         if char in between:
             return Behavior.ALLOWED
-        # char không còn trong between — có thể bị encode theo cách khác
-        # Fallback: thử HTML entity forms (ít gặp trong <script> block)
         for form in _ENTITY_FORMS.get(char, []):
             if form.lower() in between.lower():
                 return Behavior.ENCODED
-        if between:
-            return Behavior.PARTIAL
-        return Behavior.STRIPPED
+        return Behavior.UNKNOWN
 
-    # sentinel không tìm thấy trong bất kỳ <script> block nào
-    # Fallback về _analyse_char trên toàn HTML (ít chính xác hơn)
     log.debug("  js_string probe: sentinel not found in script blocks, fallback to html")
     return _analyse_char(html, sentinel, char)
 
@@ -377,18 +242,18 @@ def _probe_backslash(base_url: str, param: str, marker: str) -> Behavior:
 
 def _probe_script(base_url: str, param: str, marker: str) -> Behavior:
     probe = f"<script>{marker}</script>"
-    html = _fetch_text(base_url, param, probe)
+    html  = _fetch_text(base_url, param, probe)
     if html is None:
         return Behavior.UNKNOWN
     if probe in html:
         return Behavior.ALLOWED
     if marker in html:
-        return Behavior.PARTIAL
+        return Behavior.UNKNOWN
     return Behavior.STRIPPED
 
 
 # ---------------------------------------------------------------------------
-# Phase 1: Tag brute-force — giữ nguyên logic, dùng ALL_TAGS đã trim
+# Phase 1: Tag brute-force
 # ---------------------------------------------------------------------------
 
 def _probe_tag(base_url: str, param: str, marker: str, tag: str) -> bool:
@@ -426,7 +291,7 @@ def _probe_all_tags(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: Event brute-force — giữ nguyên logic, dùng ALL_EVENTS đã trim
+# Phase 2: Event brute-force
 # ---------------------------------------------------------------------------
 
 def _probe_event_on_tag(
@@ -471,7 +336,7 @@ def _probe_all_events_on_tag(
 
 
 # ---------------------------------------------------------------------------
-# Public API — giữ nguyên hoàn toàn
+# Public API
 # ---------------------------------------------------------------------------
 
 def probe_filters(
@@ -481,22 +346,6 @@ def probe_filters(
     context:       str,
     js_quote_char: str = "",
 ) -> FilterMap:
-    """
-    Chạy filter detection và trả về FilterMap.
-
-    HTML context: 2-phase brute-force
-      Phase 1: Thử ALL_TAGS → tìm tags được phép
-      Phase 2: Thử ALL_EVENTS trên từng allowed tag → tìm combos
-
-    JS context: Probe quote chars + backslash.
-    Attribute context: Probe quote chars + event handlers.
-
-    Số lượng request ước tính với list đã trim:
-      HTML:      8 tags × 1 + 8 events × n_allowed_tags
-                 (thay vì 225 request bản gốc → ~30-50 request)
-      Attribute: 5 char probes + ~6 event probes = ~11 request
-      Script:    4 char probes = ~4 request
-    """
     if context == "script":
         context = "js"
 
@@ -522,7 +371,6 @@ def probe_filters(
             fm.script_tag = _probe_script(base_url, param, marker)
             raw["script_tag"] = fm.script_tag.value
 
-            # ── Phase 1: Brute-force tags ─────────────────────────────────
             log.info("  [Phase 1] Probing %d tags: %s", len(ALL_TAGS), ALL_TAGS)
             fm.allowed_tags = _probe_all_tags(base_url, param, marker, ALL_TAGS)
             raw["allowed_tags"] = fm.allowed_tags
@@ -531,13 +379,10 @@ def probe_filters(
             if not fm.allowed_tags:
                 fm.event_handlers = Behavior.STRIPPED
             else:
-                # ── Phase 2: Brute-force events ───────────────────────────
                 log.info(
-                    "  [Phase 2] Probing %d events × %d tags...",
+                    "  [Phase 2] Probing %d events x %d tags...",
                     len(ALL_EVENTS), len(fm.allowed_tags)
                 )
-
-                combos: list[tuple[str, str]] = []
 
                 def probe_tag_events(tag: str) -> list[tuple[str, str]]:
                     evs = _probe_all_events_on_tag(
@@ -550,41 +395,23 @@ def probe_filters(
                 ) as ex:
                     results = list(ex.map(probe_tag_events, fm.allowed_tags))
 
-                for tag_combos in results:
-                    combos.extend(tag_combos)
+                fm.allowed_combos = [combo for tag_combos in results for combo in tag_combos]
+                raw["allowed_combos"] = fm.allowed_combos
+                log.info("  [Phase 2] %d combos found: %s", len(fm.allowed_combos), fm.allowed_combos)
 
-                fm.allowed_combos = combos
-                raw["allowed_combos"] = [(t, e) for t, e in combos]
-                log.info("  [Phase 2] %d combos found: %s", len(combos), combos)
-
-                # Derive legacy fields
-                tags_with_events = {t for t, _ in combos}
-
-                if any(t in ("img", "svg", "video", "audio", "iframe")
-                       for t in tags_with_events):
-                    fm.event_handlers = Behavior.ALLOWED
-                else:
-                    fm.event_handlers = Behavior.STRIPPED
-
-                if any(t in ("xss", "x", "custom") for t in tags_with_events):
-                    fm.custom_tag_events = Behavior.ALLOWED
-
-                if "body" in tags_with_events:
-                    fm.body_events = Behavior.ALLOWED
-
-                if "input" in tags_with_events:
-                    fm.input_events = Behavior.ALLOWED
+                fm.event_handlers = (
+                    Behavior.ALLOWED if fm.allowed_combos else Behavior.STRIPPED
+                )
 
     # ── Attribute context ──────────────────────────────────────────────────
     elif context == "attribute":
-        fm.angle_open   = pc("<",  "angle_open")
-        fm.angle_close  = pc(">",  "angle_close")
-        fm.double_quote = pc('"',  "double_quote")
-        fm.single_quote = pc("'",  "single_quote")
-        fm.backtick     = pc("`",  "backtick")
+        fm.angle_open   = pc("<", "angle_open")
+        fm.angle_close  = pc(">", "angle_close")
+        fm.double_quote = pc('"', "double_quote")
+        fm.single_quote = pc("'", "single_quote")
+        fm.backtick     = pc("`", "backtick")
 
-        if fm.tags_usable or fm.double_quote_free or fm.single_quote_free:
-            # Probe events chỉ trên img (đủ cho Test 3)
+        if fm.tags_usable or fm.double_quote == Behavior.ALLOWED or fm.single_quote == Behavior.ALLOWED:
             allowed_evs = _probe_all_events_on_tag(
                 base_url, param, marker, "img",
                 ["onerror", "onload", "onmouseover", "onfocus", "ontoggle"]
@@ -599,20 +426,6 @@ def probe_filters(
 
     # ── JS context ─────────────────────────────────────────────────────────
     elif context == "js":
-        # Quan trọng: phải dùng _probe_char_in_js_string cho quote char đang
-        # wrap JS string, KHÔNG dùng _probe_char thông thường.
-        #
-        # Lý do: server thường có 2 lớp xử lý độc lập:
-        #   1. HTML encode: < > " → entity (áp dụng cho toàn bộ output)
-        #   2. JS string escape: ' → \' (chỉ áp dụng cho chars trong JS string)
-        #
-        # _probe_char gửi SENTINEL'SENTINEL dưới dạng raw param, server thấy
-        # ' không nằm trong JS string → HTML-encode → trả về ENCODED.
-        # Nhưng thực tế khi user inject vào JS string, server sẽ ESCAPE.
-        # → sq_escaped = False → bs_pay không sinh → miss lab này.
-        #
-        # Fix: dùng _probe_char_in_js_string để probe quote char trong đúng
-        # JS string context, đọc kết quả từ <script> block của response.
         def pjs(char: str, label: str) -> Behavior:
             b = _probe_char_in_js_string(base_url, param, marker, char, js_quote_char)
             raw[label] = b.value
@@ -636,7 +449,7 @@ def probe_filters(
             fm.double_quote = Behavior.ALLOWED
             fm.backtick     = Behavior.ALLOWED
 
-        fm.backslash  = _probe_backslash(base_url, param, marker)
+        fm.backslash   = _probe_backslash(base_url, param, marker)
         raw["backslash"] = fm.backslash.value
 
         fm.angle_open  = pc("<", "angle_open")
@@ -649,8 +462,6 @@ def probe_filters(
     fm.raw = raw
     log.info(
         "FilterMap [ctx=%s param=%s]: allowed_tags=%s combos=%d",
-        context, param,
-        getattr(fm, "allowed_tags", []),
-        len(getattr(fm, "allowed_combos", [])),
+        context, param, fm.allowed_tags, len(fm.allowed_combos),
     )
     return fm

@@ -71,7 +71,7 @@ def probe_endpoint(endpoint: dict) -> list[dict]:
         {
             "url":        str,   # clean base URL
             "param":      str,   # parameter name
-            "probe_kind": str,   # "value" | "key" | "bare"
+            "probe_kind": str,   # "value" | "bare"
             "probe_url":  str,   # exact URL fetched
             "context":    str,   # ONE context label for this position
             "attr_name":  str,   # attribute name if context=attribute/url
@@ -91,13 +91,9 @@ def probe_endpoint(endpoint: dict) -> list[dict]:
     # no re-parsing of raw_url needed.
     all_params: list[Param] = []
     for p in raw_params:
-        if isinstance(p, dict):
-            all_params.append(Param(name=p["name"], has_value=p.get("has_value", True)))
-        elif isinstance(p, str):
-            all_params.append(Param(name=p, has_value=True))
+            all_params.append(Param(name=p["name"]))
 
     markers: dict[str, str] = {p.name: generate_marker() for p in all_params}
-    # Bare probe only makes sense when there are no known params.
     if not all_params:
         markers[BARE_PARAM_NAME] = generate_marker()
 
