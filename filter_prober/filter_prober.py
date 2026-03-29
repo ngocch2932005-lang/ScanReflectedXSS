@@ -43,12 +43,12 @@ _SESSION.headers.update({
 # ---------------------------------------------------------------------------
 
 class Behavior(str, Enum):
-    ALLOWED  = "allowed"
-    ENCODED  = "encoded"
-    ESCAPED  = "escaped"
-    DOUBLED  = "doubled"
-    STRIPPED = "stripped"
-    UNKNOWN  = "unknown"
+    ALLOWED  = "allowed" #cho phép
+    ENCODED  = "encoded" #ký tự bị mã hóa
+    ESCAPED  = "escaped" #ký tự bị escape \
+    DOUBLED  = "doubled" #ký tự \ -> \\
+    STRIPPED = "stripped" #ký tự bị cắt đi hoàn toàn
+    UNKNOWN  = "unknown" #không xác định
 
 
 # ---------------------------------------------------------------------------
@@ -346,44 +346,30 @@ def probe_filters(
     context:       str,
     js_quote_char: str = "",
 ) -> FilterMap:
+
     if context == "script":
         context = "js"
 
     fm  = FilterMap()
     raw: dict = {}
 
-    def pc(char: str, label: str) -> Behavior:
-        b = _probe_char(base_url, param, marker, char)
-        raw[label] = b.value
-        log.debug("  char probe %-16s → %s", label, b.value)
-        return b
-
     # ── HTML context ──────────────────────────────────────────────────────
     if context == "html":
-        fm.angle_open   = pc("<", "angle_open")
-        fm.angle_close  = pc(">", "angle_close")
-        fm.double_quote = pc('"', "double_quote")
+        fm.angle_open   = _probe_char(base_url, param, marker, "<")
+        fm.angle_close  = _probe_char(base_url, param, marker, ">")
+        fm.double_quote = _probe_char(base_url, param, marker, '"')
 
         if not fm.tags_usable:
             fm.script_tag     = Behavior.STRIPPED
             fm.event_handlers = Behavior.STRIPPED
         else:
             fm.script_tag = _probe_script(base_url, param, marker)
-            raw["script_tag"] = fm.script_tag.value
 
-            log.info("  [Phase 1] Probing %d tags: %s", len(ALL_TAGS), ALL_TAGS)
             fm.allowed_tags = _probe_all_tags(base_url, param, marker, ALL_TAGS)
-            raw["allowed_tags"] = fm.allowed_tags
-            log.info("  [Phase 1] Allowed: %s", fm.allowed_tags)
 
             if not fm.allowed_tags:
                 fm.event_handlers = Behavior.STRIPPED
             else:
-                log.info(
-                    "  [Phase 2] Probing %d events x %d tags...",
-                    len(ALL_EVENTS), len(fm.allowed_tags)
-                )
-
                 def probe_tag_events(tag: str) -> list[tuple[str, str]]:
                     evs = _probe_all_events_on_tag(
                         base_url, param, marker, tag, ALL_EVENTS
@@ -395,9 +381,9 @@ def probe_filters(
                 ) as ex:
                     results = list(ex.map(probe_tag_events, fm.allowed_tags))
 
-                fm.allowed_combos = [combo for tag_combos in results for combo in tag_combos]
-                raw["allowed_combos"] = fm.allowed_combos
-                log.info("  [Phase 2] %d combos found: %s", len(fm.allowed_combos), fm.allowed_combos)
+                fm.allowed_combos = [
+                    combo for tag_combos in results for combo in tag_combos
+                ]
 
                 fm.event_handlers = (
                     Behavior.ALLOWED if fm.allowed_combos else Behavior.STRIPPED
@@ -405,13 +391,16 @@ def probe_filters(
 
     # ── Attribute context ──────────────────────────────────────────────────
     elif context == "attribute":
-        fm.angle_open   = pc("<", "angle_open")
-        fm.angle_close  = pc(">", "angle_close")
-        fm.double_quote = pc('"', "double_quote")
-        fm.single_quote = pc("'", "single_quote")
-        fm.backtick     = pc("`", "backtick")
+        fm.angle_open   = _probe_char(base_url, param, marker, "<")
+        fm.angle_close  = _probe_char(base_url, param, marker, ">")
+        fm.double_quote = _probe_char(base_url, param, marker, '"')
+        fm.single_quote = _probe_char(base_url, param, marker, "'")
+        fm.backtick     = _probe_char(base_url, param, marker, "`")
 
-        if fm.tags_usable or fm.double_quote == Behavior.ALLOWED or fm.single_quote == Behavior.ALLOWED:
+        if (
+            fm.double_quote == Behavior.ALLOWED
+            or fm.single_quote == Behavior.ALLOWED
+        ):
             allowed_evs = _probe_all_events_on_tag(
                 base_url, param, marker, "img",
                 ["onerror", "onload", "onmouseover", "onfocus", "ontoggle"]
@@ -422,46 +411,42 @@ def probe_filters(
         else:
             fm.event_handlers = Behavior.UNKNOWN
 
-        raw["event_handlers"] = fm.event_handlers.value
-
     # ── JS context ─────────────────────────────────────────────────────────
     elif context == "js":
-        def pjs(char: str, label: str) -> Behavior:
-            b = _probe_char_in_js_string(base_url, param, marker, char, js_quote_char)
-            raw[label] = b.value
-            log.debug("  js_string char probe %-16s → %s", label, b.value)
-            return b
 
         if js_quote_char == "'":
-            fm.single_quote = pjs("'", "single_quote")
+            fm.single_quote = _probe_char_in_js_string(base_url, param, marker, "'", js_quote_char)
             fm.double_quote = Behavior.ALLOWED
-            fm.backtick     = pc("`", "backtick")
+            fm.backtick     = _probe_char(base_url, param, marker, "`")
+
         elif js_quote_char == '"':
-            fm.double_quote = pjs('"', "double_quote")
+            fm.double_quote = _probe_char_in_js_string(base_url, param, marker, '"', js_quote_char)
             fm.single_quote = Behavior.ALLOWED
-            fm.backtick     = pc("`", "backtick")
+            fm.backtick     = _probe_char(base_url, param, marker, "`")
+
         elif js_quote_char == "`":
-            fm.backtick     = pjs("`", "backtick")
+            fm.backtick     = _probe_char_in_js_string(base_url, param, marker, "`", js_quote_char)
             fm.single_quote = Behavior.ALLOWED
             fm.double_quote = Behavior.ALLOWED
+
         else:
             fm.single_quote = Behavior.ALLOWED
             fm.double_quote = Behavior.ALLOWED
             fm.backtick     = Behavior.ALLOWED
 
-        fm.backslash   = _probe_backslash(base_url, param, marker)
-        raw["backslash"] = fm.backslash.value
+        fm.backslash = _probe_backslash(base_url, param, marker)
 
-        fm.angle_open  = pc("<", "angle_open")
-        fm.angle_close = pc(">", "angle_close")
+        fm.angle_open  = _probe_char(base_url, param, marker, "<")
+        fm.angle_close = _probe_char(base_url, param, marker, ">")
 
         if fm.tags_usable:
             fm.script_tag = _probe_script(base_url, param, marker)
-            raw["script_tag"] = fm.script_tag.value
 
     fm.raw = raw
+
     log.info(
         "FilterMap [ctx=%s param=%s]: allowed_tags=%s combos=%d",
         context, param, fm.allowed_tags, len(fm.allowed_combos),
     )
+
     return fm

@@ -1,13 +1,5 @@
-"""
-reporter.py — Write scan reports from confirmed Finding objects.
-
-Public API
-----------
-write_report(findings, output_dir, target_url, stem) -> {"json": Path, "html": Path}
-"""
 
 from __future__ import annotations
-
 import json
 import html as _esc
 from datetime import datetime, timezone
@@ -15,25 +7,6 @@ from pathlib import Path
 from typing import Union
 
 from verify.verifier import Finding
-
-
-# ---------------------------------------------------------------------------
-# Severity
-# ---------------------------------------------------------------------------
-
-def _severity(f: Finding) -> str:
-    s = f.payload.strategy
-    if any(x in s for x in ("script_tag", "direct_js", "img_onerror",
-                              "svg_onload", "srcdoc", "script_img",
-                              "script_svg", "raw_js")):
-        return "high"
-    if any(x in s for x in ("js_uri", "backtick", "template",
-                              "quoted_breakout", "bs_double")):
-        return "medium"
-    return "medium"
-
-
-_SEV_COLOR = {"high": "#c0392b", "medium": "#e67e22", "low": "#27ae60"}
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +19,6 @@ def _to_dict(f: Finding) -> dict:
         "param":     f.param,
         "context":   f.context,
         "attr_name": f.attr_name,
-        "severity":  _severity(f),
         "payload": {
             "value":    f.payload.value,
             "strategy": f.payload.strategy,
@@ -90,8 +62,6 @@ header p{font-size:13px;color:#a0aec0;margin-top:4px}
       box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .card-head{display:flex;align-items:center;gap:10px;padding:12px 20px;
            border-bottom:1px solid #edf2f7}
-.badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:4px;
-       color:#fff;text-transform:uppercase}
 .ctx{font-size:11px;background:#edf2f7;color:#4a5568;
      padding:3px 9px;border-radius:4px}
 .card-head .u{font-weight:600;font-size:13px;word-break:break-all}
@@ -108,9 +78,7 @@ header p{font-size:13px;color:#a0aec0;margin-top:4px}
 
 
 def _card(f: Finding, idx: int) -> str:
-    sev   = _severity(f)
-    color = _SEV_COLOR.get(sev, "#888")
-    e     = _esc.escape
+    e = _esc.escape
 
     note_html = (
         f'<div class="note">{e(f.payload.note)}</div>'
@@ -124,7 +92,6 @@ def _card(f: Finding, idx: int) -> str:
     return f"""
 <div class="card">
   <div class="card-head">
-    <span class="badge" style="background:{color}">{sev}</span>
     <span class="ctx">{e(f.context)}</span>
     <span class="u">#{idx} &nbsp;{e(f.url)}</span>
   </div>
@@ -160,9 +127,6 @@ def write_html(
 
     now   = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     total = len(findings)
-    high  = sum(1 for f in findings if _severity(f) == "high")
-    med   = sum(1 for f in findings if _severity(f) == "medium")
-    low   = sum(1 for f in findings if _severity(f) == "low")
 
     cards = "\n".join(_card(f, i + 1) for i, f in enumerate(findings))
     body  = cards or '<div class="empty">No confirmed XSS findings.</div>'
@@ -186,9 +150,6 @@ def write_html(
 </header>
 <div class="summary">
   <div class="stat"><div class="n">{total}</div><div class="l">Total</div></div>
-  <div class="stat"><div class="n" style="color:#c0392b">{high}</div><div class="l">High</div></div>
-  <div class="stat"><div class="n" style="color:#e67e22">{med}</div><div class="l">Medium</div></div>
-  <div class="stat"><div class="n" style="color:#27ae60">{low}</div><div class="l">Low</div></div>
 </div>
 <div class="findings">{body}</div>
 </body>

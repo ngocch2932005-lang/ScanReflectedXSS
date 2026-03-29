@@ -1,12 +1,11 @@
 """
-verifier.py — XSS payload verification using Playwright.
+verifier.py — XSS payload verification using    .
 
 Architecture
 ============
 - Dùng một browser instance duy nhất cho cả session (khởi động 1 lần)
 - Mỗi payload: tạo new BrowserContext (isolated cookies/storage)
 - Timeout 4s mỗi page, dismiss dialog ngay khi xuất hiện
-- Nếu Playwright không available: fallback về HTTP string matching
   với cảnh báo rõ ràng (không im lặng degrade)
 
 Supported contexts: "html" | "attribute" | "script"
@@ -47,7 +46,7 @@ _HTTP_SESSION.headers.update({
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
-
+# object đại diện cho một lỗ hổng đã được xác nhận
 @dataclass
 class Finding:
     url:       str
@@ -56,22 +55,22 @@ class Finding:
     attr_name: str
     payload:   Payload
     probe_url: str
-    evidence:  str
-    snippet:   str = ""
+    evidence:  str # bằng chứng xác minh diglog đã bật
+    snippet:   str = "" # đoạn HTML xung quang để tiện report, debug.
 
 
 # ---------------------------------------------------------------------------
 # Playwright browser — singleton, lazy init
 # ---------------------------------------------------------------------------
 
-_pw      = None
+_pw      = None # instance playwright runtime
 _browser = None
-
+# chỉ khởi tạo browser 1 lần, sau đó dùng lại cho nhiều lần verify
 def _get_browser():
     global _pw, _browser
-    if _browser is not None:
+    if _browser is not None: # nếu có rồi thì trả về luôn
         return _browser
-    try:
+    try: # nếu chưa có gọi sync_playwright để launch chromium headless (k có giao diện).
         _pw      = sync_playwright().start()
         _browser = _pw.chromium.launch(
             headless = True,
@@ -88,7 +87,7 @@ def _get_browser():
         log.warning("Playwright not available: %s — falling back to HTTP mode", exc)
         return None
 
-
+# đóng trình duyệt, stop instance playwright
 def close_browser() -> None:
     global _pw, _browser
     if _browser:
@@ -108,7 +107,7 @@ def close_browser() -> None:
 # ---------------------------------------------------------------------------
 # URL injection helper
 # ---------------------------------------------------------------------------
-
+# thay giá trị gốc, build lại url hoàn chỉnh
 def _inject_url(base_url: str, param: str, value: str) -> str:
     parsed = urlparse(base_url)
     params = parse_qs(parsed.query, keep_blank_values=True)
@@ -120,6 +119,7 @@ def _inject_url(base_url: str, param: str, value: str) -> str:
 # Playwright verification
 # ---------------------------------------------------------------------------
 
+# sinh javascript để kích hoạt event
 def _get_trigger_js(strategy: str) -> str | None:
     s = strategy.lower()
 
@@ -163,6 +163,8 @@ def _verify_playwright(probe_url: str, payload: Payload) -> tuple[bool, str]:
 
         dialogs: list[dict] = []
 
+        # bắt dialog, khi có được xss payload chạy kiểu alert(1) sẽ bắt được event dialog
+        # sau đó lưu lại type, và message, và dismiss ngay để k bị treo.
         def _on_dialog(dialog):
             dialogs.append({"type": dialog.type, "message": dialog.message})
             try:
@@ -171,7 +173,7 @@ def _verify_playwright(probe_url: str, payload: Payload) -> tuple[bool, str]:
                 pass
 
         page.on("dialog", _on_dialog)
-
+        
         try:
             page.goto(probe_url, timeout=PAGE_TIMEOUT_MS, wait_until="domcontentloaded")
         except Exception as nav_err:
@@ -223,82 +225,6 @@ def _verify_playwright(probe_url: str, payload: Payload) -> tuple[bool, str]:
                 pass
 
 
-# ---------------------------------------------------------------------------
-# HTTP fallback verification
-# ---------------------------------------------------------------------------
-
-def _normalize_html(text: str) -> str:
-    import html as _h
-    text = _h.unescape(text)
-    text = text.replace("%3C", "<").replace("%3c", "<")
-    text = text.replace("%3E", ">").replace("%3e", ">")
-    text = text.replace("%22", '"').replace("%27", "'")
-    return text
-
-
-_EXEC_PAIRS = [
-    ("alert(1)",     "alert(1)"),
-    ("confirm(1)",   "confirm(1)"),
-    ("(alert)(1)",   "(alert)(1)"),
-    ("alert`1`",     "alert`1`"),
-    ("confirm?.(1)", "confirm?.(1)"),
-    ("print()",      "print()"),
-]
-
-# Structural signals per context — "url" và "js" aliases đã bị loại bỏ
-_STRUCTURAL: dict[str, list[str]] = {
-    "html":      ["<script>", "onerror=", "onload=", "onfocus=", "ontoggle=",
-                  "onmouseover=", "onpointerover=", "srcdoc=", "javascript:", "onbegin="],
-    "attribute": ["onerror=", "onmouseover=", "onfocus=", "ontoggle=",
-                  "onpointerover=", "javascript:", "<script>", "<img ", "<svg"],
-    "script":    ["alert(1)", "confirm(1)", "(alert)(1)", "alert`1`",
-                  "-alert(", "||alert(", "`;", "</script>"],
-}
-
-
-def _verify_http_fallback(
-    base_url: str,
-    param:    str,
-    payload:  Payload,
-) -> tuple[bool, str]:
-    import re, html as _h
-
-    probe_url = _inject_url(base_url, param, payload.value)
-    try:
-        resp = _HTTP_SESSION.get(probe_url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-    except requests.RequestException as exc:
-        log.warning("HTTP fallback request failed: %s", exc)
-        return False, ""
-
-    if "html" not in resp.headers.get("Content-Type", ""):
-        return False, ""
-
-    raw  = resp.text
-    norm = _normalize_html(raw)
-
-    # script context — tìm exec signal trong <script> block
-    if payload.context == "script":
-        script_blocks = re.findall(r"<script[^>]*>(.*?)</script>", norm,
-                                   re.DOTALL | re.IGNORECASE)
-        for block in script_blocks:
-            for src_frag, _ in _EXEC_PAIRS:
-                if src_frag in payload.value and src_frag in block:
-                    ev = (f"HTTP fallback: '{src_frag}' found in <script> block"
-                          f" | strategy={payload.strategy}")
-                    return True, ev
-        return False, ""
-
-    # html / attribute context
-    structural = _STRUCTURAL.get(payload.context, [])
-    for src_frag, html_frag in _EXEC_PAIRS:
-        if src_frag in payload.value and html_frag in norm:
-            for sig in structural:
-                if sig in norm:
-                    ev = f"HTTP fallback: '{html_frag}' + '{sig}' in response"
-                    return True, ev
-
-    return False, ""
-
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -346,8 +272,8 @@ def verify_finding(
 
         if pw_available:
             confirmed, evidence = _verify_playwright(probe_url, payload)
-        else:
-            confirmed, evidence = _verify_http_fallback(base_url, param, payload)
+        # else:
+        #     confirmed, evidence = _verify_http_fallback(base_url, param, payload)
 
         if confirmed:
             snippet = ""
